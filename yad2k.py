@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 """
 Reads Darknet19 config and weights and creates Keras model with TF backend.
 
@@ -128,43 +128,50 @@ def _main(args):
             print('conv2d', 'bn'
                   if batch_normalize else '  ', activation, weights_shape)
 
-            conv_bias = np.ndarray(
-                shape=(filters, ),
-                dtype='float32',
-                buffer=weights_file.read(filters * 4))
-            count += filters
-
-            if batch_normalize:
-                bn_weights = np.ndarray(
-                    shape=(3, filters),
+            bias_data = weights_file.read(filters * 4)
+            maybe_weights = dict()
+            maybe_bn_weights = dict()
+            if bias_data:
+                conv_bias = np.ndarray(
+                    shape=(filters, ),
                     dtype='float32',
-                    buffer=weights_file.read(filters * 12))
-                count += 3 * filters
+                    buffer=bias_data)
+                count += filters
 
-                # TODO: Keras BatchNormalization mistakenly refers to var
-                # as std.
-                bn_weight_list = [
-                    bn_weights[0],  # scale gamma
-                    conv_bias,  # shift beta
-                    bn_weights[1],  # running mean
-                    bn_weights[2]  # running var
+                if batch_normalize:
+                    bn_weights = np.ndarray(
+                        shape=(3, filters),
+                        dtype='float32',
+                        buffer=weights_file.read(filters * 12))
+                    count += 3 * filters
+
+                    # TODO: Keras BatchNormalization mistakenly refers to var
+                    # as std.
+                    maybe_bn_weights = dict(weights=[
+                        bn_weights[0],  # scale gamma
+                        conv_bias,  # shift beta
+                        bn_weights[1],  # running mean
+                        bn_weights[2]  # running var
+                    ])
+
+                conv_weights = np.ndarray(
+                    shape=darknet_w_shape,
+                    dtype='float32',
+                    buffer=weights_file.read(weights_size * 4))
+                count += weights_size
+
+                # DarkNet conv_weights are serialized Caffe-style:
+                # (out_dim, in_dim, height, width)
+                # We would like to set these to Tensorflow order:
+                # (height, width, in_dim, out_dim)
+                # TODO: Add check for Theano dim ordering.
+                conv_weights = np.transpose(conv_weights, [2, 3, 1, 0])
+                conv_weights = [conv_weights] if batch_normalize else [
+                    conv_weights, conv_bias
                 ]
-
-            conv_weights = np.ndarray(
-                shape=darknet_w_shape,
-                dtype='float32',
-                buffer=weights_file.read(weights_size * 4))
-            count += weights_size
-
-            # DarkNet conv_weights are serialized Caffe-style:
-            # (out_dim, in_dim, height, width)
-            # We would like to set these to Tensorflow order:
-            # (height, width, in_dim, out_dim)
-            # TODO: Add check for Theano dim ordering.
-            conv_weights = np.transpose(conv_weights, [2, 3, 1, 0])
-            conv_weights = [conv_weights] if batch_normalize else [
-                conv_weights, conv_bias
-            ]
+                maybe_weights = dict(weights=conv_weights)
+            else:
+                print("warning! no weights found for layer {}".format(len(all_layers)))
 
             # Handle activation.
             act_fn = None
@@ -175,19 +182,20 @@ def _main(args):
                     'Unknown activation function `{}` in section {}'.format(
                         activation, section))
 
+
             # Create Conv2D layer
             conv_layer = (Conv2D(
                 filters, (size, size),
                 strides=(stride, stride),
                 kernel_regularizer=l2(weight_decay),
                 use_bias=not batch_normalize,
-                weights=conv_weights,
+                **maybe_weights,
                 activation=act_fn,
                 padding=padding))(prev_layer)
 
             if batch_normalize:
                 conv_layer = (BatchNormalization(
-                    weights=bn_weight_list))(conv_layer)
+                    **maybe_bn_weights))(conv_layer)
             prev_layer = conv_layer
 
             if activation == 'linear':
