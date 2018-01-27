@@ -237,17 +237,22 @@ def yolo_loss(args,
 
     intersect_mins = K.maximum(pred_mins, true_mins)
     intersect_maxes = K.minimum(pred_maxes, true_maxes)
+    # shape: [ batch, conv_height, conv_width, num_anchors, num_true_boxes, [w, h] ]
     intersect_wh = K.maximum(intersect_maxes - intersect_mins, 0.)
+    # shape: [ batch, conv_height, conv_width, num_anchors, num_true_boxes ]
     intersect_areas = intersect_wh[..., 0] * intersect_wh[..., 1]
 
     pred_areas = pred_wh[..., 0] * pred_wh[..., 1]
     true_areas = true_wh[..., 0] * true_wh[..., 1]
 
     union_areas = pred_areas + true_areas - intersect_areas
+    # shape: [ batch, conv_height, conv_width, num_anchors, num_true_boxes ]
     iou_scores = intersect_areas / union_areas
 
     # Best IOUs for each location.
+    # shape: [ batch, conv_height, conv_width, num_anchors ]
     best_ious = K.max(iou_scores, axis=4)  # Best IOU scores.
+    # shape: [ batch, conv_height, conv_width, num_anchors, 1 ]
     best_ious = K.expand_dims(best_ious)
 
     # A detector has found an object if IOU > thresh for some true box.
