@@ -206,6 +206,7 @@ def yolo_loss(args,
         -1, yolo_output_shape[1], yolo_output_shape[2], num_anchors,
         num_classes + 5
     ])
+    # shape: batches, conv_height, conv_width, num_anchors, [dy?, dx?, log(h/ah), log(w/aw)]
     pred_boxes = K.concatenate(
         (K.sigmoid(feats[..., 0:2]), feats[..., 2:4]), axis=-1)
 
