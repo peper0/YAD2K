@@ -69,7 +69,7 @@ def yolo_head(feats, anchors, num_classes):
     Parameters
     ----------
     feats : tensor
-        Final convolutional layer features.
+        Final convolutional layer features. Data order: batch * y * x * anchor * (sx, sy, sw, sh, c, [classes])
     anchors : array-like
         Anchor box widths and heights.
     num_classes : int
@@ -178,7 +178,7 @@ def yolo_loss(args,
     num_classes : int
         Number of object classes.
 
-    rescore_confidence : bool, default=False
+    rescore_confidence : bool, default=True
         If true then set confidence target to IOU of best predicted box with
         the closest matching ground truth box.
 
@@ -294,6 +294,7 @@ def yolo_loss(args,
                         K.square(matching_boxes - pred_boxes))
 
     confidence_loss_sum = K.sum(confidence_loss)
+
     classification_loss_sum = K.sum(classification_loss)
     coordinates_loss_sum = K.sum(coordinates_loss)
     xy_loss_sum = K.sum(coordinates_loss[...,0:2])
@@ -302,12 +303,16 @@ def yolo_loss(args,
     total_loss = 0.5 * (
         confidence_loss_sum + classification_loss_sum + coordinates_loss_sum)
     if print_loss:
-        total_loss = tf.Print(
-            total_loss, [
-                total_loss, confidence_loss_sum, classification_loss_sum,
-                coordinates_loss_sum
-            ],
-            message='yolo_loss, conf_loss, class_loss, box_coord_loss:')
+        total_loss = tf.Print(total_loss, [ 1 ], message='1', summarize=10000)
+        # total_loss = tf.Print(total_loss, [ detectors_mask * matching_boxes ], message='matching_boxes', summarize=10000)
+        # total_loss = tf.Print(total_loss, [ detectors_mask * pred_boxes ], message='pred_boxes', summarize=10000)
+        # total_loss = tf.Print(total_loss, [ detectors_mask * K.square(matching_boxes - pred_boxes) ], message='matching_boxes - pred_boxes', summarize=10000)
+        total_loss = tf.Print(total_loss, [ xy_loss_sum ], message='xy_loss_sum', summarize=10000)
+        total_loss = tf.Print(total_loss, [ wh_loss_sum ], message='wh_loss_sum', summarize=10000)
+        total_loss = tf.Print(total_loss, [ coordinates_loss_sum ], message='coordinates_loss_sum', summarize=10000)
+        total_loss = tf.Print(total_loss, [ confidence_loss_sum ], message='confidence_loss_sum', summarize=10000)
+        total_loss = tf.Print(total_loss, [ classification_loss_sum ], message='classification_loss_sum', summarize=10000)
+        total_loss = tf.Print(total_loss, [ total_loss ], message='total_loss', summarize=10000)
 
     return K.stack((xy_loss_sum, wh_loss_sum, confidence_loss_sum, classification_loss_sum))
 
