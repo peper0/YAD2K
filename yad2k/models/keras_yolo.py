@@ -296,6 +296,9 @@ def yolo_loss(args,
     confidence_loss_sum = K.sum(confidence_loss)
     classification_loss_sum = K.sum(classification_loss)
     coordinates_loss_sum = K.sum(coordinates_loss)
+    xy_loss_sum = K.sum(coordinates_loss[...,0:2])
+    wh_loss_sum = K.minimum(K.sum(coordinates_loss[...,2:4]), 100)
+
     total_loss = 0.5 * (
         confidence_loss_sum + classification_loss_sum + coordinates_loss_sum)
     if print_loss:
@@ -306,7 +309,7 @@ def yolo_loss(args,
             ],
             message='yolo_loss, conf_loss, class_loss, box_coord_loss:')
 
-    return total_loss
+    return K.stack((xy_loss_sum, wh_loss_sum, confidence_loss_sum, classification_loss_sum))
 
 
 def yolo(inputs, anchors, num_classes):
