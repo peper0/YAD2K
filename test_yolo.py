@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 """Run a YOLO_v2 style detection model on test images."""
 import argparse
 import colorsys
@@ -10,6 +10,8 @@ import numpy as np
 from keras import backend as K
 from keras.models import load_model
 from PIL import Image, ImageDraw, ImageFont
+import tensorflow as tf
+from tensorflow.python.client import timeline
 
 from yad2k.models.keras_yolo import yolo_eval, yolo_head
 
@@ -139,14 +141,25 @@ def _main(args):
         image_data /= 255.
         image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
 
+        
+        options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        run_metadata = tf.RunMetadata()
+
         out_boxes, out_scores, out_classes = sess.run(
             [boxes, scores, classes],
             feed_dict={
                 yolo_model.input: image_data,
                 input_image_shape: [image.size[1], image.size[0]],
                 K.learning_phase(): 0
-            })
+            },
+            options=options, run_metadata=run_metadata)
         print('Found {} boxes for {}'.format(len(out_boxes), image_file))
+
+        # Create the Timeline object, and write it to a json file
+        fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+        chrome_trace = fetched_timeline.generate_chrome_trace_format()
+        with open('timeline_01.json', 'w') as f:
+            f.write(chrome_trace)
 
         font = ImageFont.truetype(
             font='font/FiraMono-Medium.otf',
@@ -187,6 +200,8 @@ def _main(args):
             del draw
 
         image.save(os.path.join(output_path, image_file), quality=90)
+        
+        
     sess.close()
 
 
