@@ -152,7 +152,7 @@ def yolo_boxes_to_corners(box_xy, box_wh):
 def yolo_loss(args,
               anchors,
               num_classes,
-              rescore_confidence=False,
+              rescore_confidence=True,
               print_loss=False):
     """YOLO localization loss function.
 
@@ -245,7 +245,8 @@ def yolo_loss(args,
     pred_areas = pred_wh[..., 0] * pred_wh[..., 1]
     true_areas = true_wh[..., 0] * true_wh[..., 1]
 
-    union_areas = pred_areas + true_areas - intersect_areas
+    union_areas_c = pred_areas + true_areas - intersect_areas
+    union_areas = tf.maximum(union_areas_c, tf.ones_like(union_areas_c)*1.e-6) # workaround for 0-sized boxes
     # shape: [ batch, conv_height, conv_width, num_anchors, num_true_boxes ]
     iou_scores = intersect_areas / union_areas
 
@@ -254,6 +255,8 @@ def yolo_loss(args,
     best_ious = K.max(iou_scores, axis=4)  # Best IOU scores.
     # shape: [ batch, conv_height, conv_width, num_anchors, 1 ]
     best_ious = K.expand_dims(best_ious)
+    # for the case of empty true_boxes
+    best_ious = tf.cond(tf.equal(tf.size(true_boxes), 0), lambda: tf.zeros_like(detectors_mask), lambda: best_ious)
 
     # A detector has found an object if IOU > thresh for some true box.
     object_detections = K.cast(best_ious > 0.6, K.dtype(best_ious))
@@ -268,9 +271,11 @@ def yolo_loss(args,
     no_objects_loss = no_object_weights * K.square(-pred_confidence)
 
     if rescore_confidence:
+        # Like in original darknet: use iou as the "truth" for confidence
         objects_loss = (object_scale * detectors_mask *
-                        K.square(best_ious - pred_confidence))
+                        K.square(tf.stop_gradient(best_ious) - pred_confidence))
     else:
+        # Use 1 as truth
         objects_loss = (object_scale * detectors_mask *
                         K.square(1 - pred_confidence))
     confidence_loss = objects_loss + no_objects_loss
