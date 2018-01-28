@@ -98,6 +98,8 @@ def data_generator(path, class_names: Sequence[str], infinite = True) -> DataGen
                             xmax = (center_x + width/2)*image.shape[1]
                             ymax = (center_y + height/2)*image.shape[0]
                             boxes.append((class_index, xmin, ymin, xmax, ymax))
+                        if len(boxes) == 0:
+                            raise Exception("no true boxes!")
                     yield image, np.array(boxes)
                 except Exception:
                     logging.exception("exception during reading image or labels for '{}'; ignoring".format(filename))
