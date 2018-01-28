@@ -305,7 +305,7 @@ def prepare_model(anchors: Anchors, class_names: Sequence[str], model_path: str,
         loss={
             'yolo_loss': lambda y_true, y_pred: K.sum(y_pred)
         },  # This is a hack to use the custom loss function in the last layer.
-        metrics=[pick_index(0, 'xy_err'), pick_index(1, 'wh_err'), pick_index(0, 'confidence_err'), pick_index(0, 'class_err')]
+        metrics=[pick_index(0, 'xy_err'), pick_index(1, 'wh_err'), pick_index(2, 'confidence_err'), pick_index(3, 'class_err')]
     )
 
     #print("====trainable:")
