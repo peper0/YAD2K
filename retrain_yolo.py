@@ -144,6 +144,7 @@ def process_data(images, boxes=None):
     else:
         return np.array(processed_images)
 
+
 def get_detector_mask(boxes, anchors):
     '''
     Precompute detectors_mask and matching_true_boxes for training.
@@ -158,6 +159,7 @@ def get_detector_mask(boxes, anchors):
         detectors_mask[i], matching_true_boxes[i] = preprocess_true_boxes(box, anchors, [416, 416])
 
     return np.array(detectors_mask), np.array(matching_true_boxes)
+
 
 def create_model(anchors, class_names, load_pretrained=True, freeze_body=True):
     '''

@@ -19,18 +19,16 @@ from keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping, LambdaC
 from scipy.ndimage.io import imread
 
 from yad2k.models.keras_yolo import (preprocess_true_boxes,
-                                     yolo_eval, yolo_head, YoloLossLayer)
+                                     yolo_eval, yolo_head, YoloLossLayer, Anchors, IBoxes)
 from yad2k.utils.draw_boxes import draw_boxes
 
 #: Image packed in the numpy array; shape is [height, width, colors]; values in range 0..255
 Image = NewType('Image', np.array)
 
-#: indexing: [box_index, (class_index, x_min, y_min, x_max, y_max)], using pixel coordinates
+#: indexing: [box_index, [class_index, px_min, py_min, px_max, py_max]]
 Boxes = NewType('Boxes', np.array)
 
 DataGenerator = Generator[Tuple[Image, Boxes], None, None]
-
-Anchors = Sequence[Tuple[float, float]]
 
 # Args
 argparser = argparse.ArgumentParser(
@@ -150,11 +148,11 @@ def load_anchors(anchors_path) -> Anchors:
 
 
 def arraize_data(images: Sequence[Image], boxes: Optional[Sequence[Boxes]]=None) \
-        -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
+        -> Union[Tuple[np.ndarray, IBoxes], np.ndarray]:
     '''processes the data
     :returns: (np.array of resized images with normalized channels, shape [batch_size, height, width]),
               (np.array of shape [batch_size, max(num_boxes), 5], each box in the form
-              [x_center, y_center, width, height, class], everything as a fraction of proper image dimension)
+              [ix_center, iy_center, iw, ih, class])
 
     '''
     images = [PIL.Image.fromarray(i) for i in images]
@@ -177,11 +175,11 @@ def arraize_data(images: Sequence[Image], boxes: Optional[Sequence[Boxes]]=None)
         #boxes_extents = [box[:, [2, 1, 4, 3, 0]] for box in boxes]
 
         # Get box parameters as x_center, y_center, box_width, box_height, class.
-        boxes_xy = [0.5 * (box[:, 3:5] + box[:, 1:3]) for box in boxes]
-        boxes_wh = [box[:, 3:5] - box[:, 1:3] for box in boxes]
-        boxes_xy = [boxxy / orig_size(img) for boxxy, img in zip(boxes_xy, images)]
-        boxes_wh = [boxwh / orig_size(img) for boxwh, img in zip(boxes_wh, images)]
-        boxes = [np.concatenate((boxes_xy[i], boxes_wh[i], box[:, 0:1]), axis=1) for i, box in enumerate(boxes)]
+        boxes_pxy = [0.5 * (box[:, 3:5] + box[:, 1:3]) for box in boxes]
+        boxes_pwh = [box[:, 3:5] - box[:, 1:3] for box in boxes]
+        boxes_ixy = [boxxy / orig_size(img) for boxxy, img in zip(boxes_pxy, images)]
+        boxes_iwh = [boxwh / orig_size(img) for boxwh, img in zip(boxes_pwh, images)]
+        boxes = [np.concatenate((boxes_ixy[i], boxes_iwh[i], box[:, 0:1]), axis=1) for i, box in enumerate(boxes)]
 
         # find the max number of boxes
         max_boxes = 0
@@ -200,7 +198,7 @@ def arraize_data(images: Sequence[Image], boxes: Optional[Sequence[Boxes]]=None)
         return np.array(processed_images)
 
 
-def get_detector_mask(boxes, anchors):
+def get_detector_mask(boxes: IBoxes, anchors: Anchors):
     '''
     Precompute detectors_mask and matching_true_boxes for training.
     Detectors mask is 1 for each spatial position in the final conv layer and
@@ -305,8 +303,8 @@ def compile_model(model_body: Model, anchors: Anchors, class_names: Sequence[str
         optimizer=optimizers.Adam(lr=0.0001),
         #optimizer=optimizers.SGD(lr=0.001, momentum=0.9, decay=0.0005),
         loss=YoloLossLayer.loss_function,
-        metrics=[metric_from_index(1, 'xy_rmse'),
-                 metric_from_index(2, 'wh_rmse'),
+        metrics=[metric_from_index(1, 'cxy_rmse'),
+                 metric_from_index(2, 'awh_rmse'),
                  metric_from_index(3, 'good_iou_avg'),
                  metric_from_index(4, 'good_conf_avg'),
                  metric_from_index(5, 'coords_loss'),
@@ -355,7 +353,7 @@ def train(trainable_model: Model,
         images = []
         boxess = []
 
-        def push_data(images, boxess):
+        def push_data(images, boxess: Sequence[Boxes]):
             assert len(images) > 0
             logging.info("gathered batch, processing it")
             images_array, boxes_array = arraize_data(images, boxess)
