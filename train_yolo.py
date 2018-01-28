@@ -100,9 +100,10 @@ def data_generator(path, class_names: Sequence[str], infinite = True) -> DataGen
                             boxes.append((class_index, xmin, ymin, xmax, ymax))
                     yield image, np.array(boxes)
                 except Exception:
-                    logging.exception("cannot read input image or labels for '{}'; ignoring".format(filename))
-            if not infinite:
-                return
+                    logging.exception("exception during reading image or labels for '{}'; ignoring".format(filename))
+
+        if not infinite:
+            return
 
 
 def _main(args):
@@ -352,9 +353,11 @@ def train(trainable_model: Model,
         boxess = []
 
         def push_data(images, boxess):
+            assert len(images) > 0
             logging.info("gathered batch, processing it")
             images_array, boxes_array = arraize_data(images, boxess)
             detectors_mask, matching_true_boxes = get_detector_mask(boxes_array, anchors)
+
             yield ([images_array, boxes_array, detectors_mask, matching_true_boxes],  # network input
                    np.zeros(len(images_array)))  # network expected output
 
@@ -366,7 +369,8 @@ def train(trainable_model: Model,
                 images = []
                 boxess = []
 
-        yield from push_data(images, boxess)
+        if len(images) > 0:
+            yield from push_data(images, boxess)
 
     validation_data = next(iter(batch_generator(valid_data_generator)))
 
