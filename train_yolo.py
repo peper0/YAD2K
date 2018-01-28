@@ -13,13 +13,13 @@ import numpy as np
 import PIL
 import tensorflow as tf
 from keras import backend as K, optimizers
-from keras.layers import Input, Lambda, Conv2D
+from keras.layers import Input, Conv2D
 from keras.models import load_model, Model
 from keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping, LambdaCallback
 from scipy.ndimage.io import imread
 
-from yad2k.models.keras_yolo import (preprocess_true_boxes, yolo_body,
-                                     yolo_eval, yolo_head, yolo_loss)
+from yad2k.models.keras_yolo import (preprocess_true_boxes,
+                                     yolo_eval, yolo_head, YoloLossLayer)
 from yad2k.utils.draw_boxes import draw_boxes
 
 #: Image packed in the numpy array; shape is [height, width, colors]; values in range 0..255
@@ -77,7 +77,7 @@ YOLO_ANCHORS = np.array(
 
 
 IMAGE_SIZE = (608, 608)
-OUTPUT_SIZE = (19, 19)
+OUTPUT_IMG_SHAPE = (19, 19)
 
 
 def data_generator(path, class_names: Sequence[str], infinite = True) -> DataGenerator:
@@ -118,7 +118,8 @@ def _main(args):
 
     class_names = load_classes(classes_path)
     anchors = load_anchors(anchors_path)
-    model_body, trainable_model = prepare_model(anchors, class_names, model_path, args.reset_final)
+    model_body = prepare_model(model_path, anchors, class_names, args.reset_final)
+    trainable_model = compile_model(model_body, anchors, class_names)
 
     train(
         trainable_model,
@@ -127,14 +128,6 @@ def _main(args):
         data_generator(data_path, class_names, infinite=True),
         data_generator(valid_data_path, class_names, infinite=False)
     )
-
-    # draw(model_body,
-    #     class_names,
-    #     anchors,
-    #     image_data,
-    #     image_set='val', # assumes training/validation split is 0.9
-    #     weights_name='trained_stage_3_best.h5',
-    #     save_all=False)
 
 
 def load_classes(classes_path) -> List[str]:
@@ -229,31 +222,18 @@ def freeze_body(model_body, freeze):
         layer.trainable = not freeze
 
 
-def prepare_model(anchors: Anchors, class_names: Sequence[str], model_path: str, reset_final: bool) -> (Model, Model):
-    '''
-    returns the body of the model and the model
-    '''
+def final_filters_count(num_anchors, num_classes):
+    return num_anchors * (5 + num_classes)
 
-    detectors_mask_shape = OUTPUT_SIZE + (5, 1)
-    matching_boxes_shape = OUTPUT_SIZE + (5, 5)
+
+def prepare_model(model_path: str, anchors: Anchors, class_names: Sequence[str], reset_final: bool) -> (Model, Model):
+    '''
+    returns the body of the model
+    '''
 
     loaded_model = load_model(model_path)
 
-    # Create model input layers.
-    image_input = Input(shape=(None, ) + IMAGE_SIZE + (3,))
-    boxes_input = Input(shape=(None, 5))
-    detectors_mask_input = Input(shape=detectors_mask_shape)
-    matching_boxes_input = Input(shape=matching_boxes_shape)
-
-    # Create model body.
-    #yolo_model2 = yolo_body(image_input, len(anchors), len(class_names))
-    #print(yolo_model2.summary())
-    #print("====loaded:")
-    #loaded_model.summary()
-    #from keras.utils.vis_utils import plot_model as plot
-    #plot(yolo_model, to_file='{}.png'.format("yolo_body"), show_shapes=True)
-
-    final_filters = len(anchors)*(5+len(class_names))
+    final_filters = final_filters_count(len(anchors), len(class_names))
 
     if reset_final:
         topless_yolo = Model(loaded_model.input, loaded_model.layers[-2].output)
@@ -277,45 +257,64 @@ def prepare_model(anchors: Anchors, class_names: Sequence[str], model_path: str,
     assert model_body.layers[-1].output_shape[3] == final_filters, \
         "loaded model was trained for a different number of classes than found in the classes file; use --reset_final" \
         " option to reset the final layer"
+    return model_body
 
+
+def metric_from_index(index, name):
+    def metric(y_true, y_pred):
+        return K.mean(y_pred[index])
+
+    m = metric
+    m.__name__ = name
+    return m
+
+
+def compile_model(model_body: Model, anchors: Anchors, class_names: Sequence[str]) -> Model:
+    """
+    Prepares model takes yolo body model and returns the compiled model that can be trained. This model has additional
+    inputs that are used in the training:
+    1. true_boxes in the form of array [box_index, [x_center, y_center, width, height, class]]
+    2. detectors_mask with index [cell_y, cell_x, anchor_index, 1] - 1 if there should be any detection and
+    3. matching_boxes [cell_y, cell_x, anchor_index, [dy, dx, th, tw, class]]
+    """
     # Place model loss on CPU to reduce GPU memory usage.
     with tf.device('/cpu:0'):
-        # TODO: Replace Lambda with custom Keras layer for loss.
-        model_loss = Lambda(
-            yolo_loss,
-            output_shape=(4, ),
-            name='yolo_loss',
-            arguments={'anchors': anchors,
-                       'print_loss': True,
-                       'num_classes': len(class_names)})([
-                           model_body.output, boxes_input,
-                           detectors_mask_input, matching_boxes_input
-                       ])
+        # Create model input layers.
+        num_anchors = len(anchors)
+        detectors_mask_shape = OUTPUT_IMG_SHAPE + (num_anchors, 1)
+        matching_boxes_shape = OUTPUT_IMG_SHAPE + (num_anchors, 5)
+        # Additional inputs for the loss function
+        boxes_input = Input(shape=(None, 5), name="boxes_input")
+        detectors_mask_input = Input(shape=detectors_mask_shape, name="detectors_mask_input")
+        matching_boxes_input = Input(shape=matching_boxes_shape, name="matching_boxes_input")
+
+        # Loss function must be represented as a layer since in keras the truth during training has the same shape as
+        # the network output.
+        model_loss = YoloLossLayer(anchors, num_classes=len(class_names), print_loss=False, name="yolo_loss")([
+            model_body.output,
+            boxes_input,
+            detectors_mask_input,
+            matching_boxes_input
+        ])
 
     trainable_model = Model(
-        [model_body.input, boxes_input, detectors_mask_input,
-         matching_boxes_input], model_loss)
-
-    def pick_index(index, name):
-        def metric(y_true, y_pred):
-            return K.mean(y_pred[index])
-        m = metric
-        m.__name__ = name
-        return m
+        [model_body.input, boxes_input, detectors_mask_input, matching_boxes_input], model_loss)
 
     trainable_model.compile(
         # parameters copied from yolo.cfg
-        optimizer=optimizers.SGD(lr=0.001, momentum=0.9, decay=0.0005),
-        loss={
-            'yolo_loss': lambda y_true, y_pred: K.sum(y_pred)
-        },  # This is a hack to use the custom loss function in the last layer.
-        metrics=[pick_index(0, 'xy_err'), pick_index(1, 'wh_err'), pick_index(2, 'confidence_err'), pick_index(3, 'class_err')]
+        optimizer=optimizers.Adam(lr=0.0001),
+        #optimizer=optimizers.SGD(lr=0.001, momentum=0.9, decay=0.0005),
+        loss=YoloLossLayer.loss_function,
+        metrics=[metric_from_index(1, 'xy_rmse'),
+                 metric_from_index(2, 'wh_rmse'),
+                 metric_from_index(3, 'good_iou_avg'),
+                 metric_from_index(4, 'good_conf_avg'),
+                 metric_from_index(5, 'coords_loss'),
+                 metric_from_index(6, 'confidence_loss'),
+                 metric_from_index(7, 'class_loss')]
     )
 
-    #print("====trainable:")
-    #trainable_model.summary()
-
-    return model_body, trainable_model
+    return trainable_model
 
 
 def train(trainable_model: Model,
