@@ -1,0 +1,12 @@
+#!/bin/bash
+
+BASEDIR=$( dirname $0 )
+
+python3 $BASEDIR/../train_yolo.py \
+   --data_path $BASEDIR/data \
+   --valid_data_path $BASEDIR/data_valid \
+   --anchors_path $BASEDIR/model_data/yolo_anchors.txt \
+   --classes_path $BASEDIR/data/classes.txt \
+   --model_path $BASEDIR/model_data/yolo_original.h5 \
+   --reset_final \
+    2>&1 | tee -a training.log

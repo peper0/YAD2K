@@ -5,6 +5,7 @@ import argparse
 import logging
 
 import os
+from datetime import datetime
 from random import shuffle
 from typing import  Optional, Generator, Tuple, NewType, Sequence, List, Union
 
@@ -330,7 +331,7 @@ def train(trainable_model: Model,
 
     '''
 
-    tensorboard = TensorBoard(log_dir='./tensorboard',
+    tensorboard = TensorBoard(log_dir='.',
                               #histogram_freq=1,
                               write_graph=True,
                               #write_grads=True,
@@ -339,14 +340,15 @@ def train(trainable_model: Model,
                               #embeddings_layer_names=['conv2d_21'],
                               embeddings_metadata=dict(conv2d_21="conv2d_21")
                               )
-    checkpoint = ModelCheckpoint("trained_stage_3_best.h5", monitor='loss',
+    checkpoint = ModelCheckpoint("trained_best.h5", monitor='loss',
                                  save_weights_only=False, save_best_only=True)
     early_stopping = EarlyStopping(monitor='loss', min_delta=0, patience=15, verbose=1, mode='auto')
 
     def save(epoch, logs):
         print("saving model...")
-        #model_body.save('trained_epoch_{}.h5'.format(epoch))
-        model_body.save('trained_epoch_last.h5')
+        if epoch % 50 == 1:
+            model_body.save('trained_epoch_{}.h5'.format(datetime.now().strftime('%Y-%m-%d_%H:%M:%S')))
+        model_body.save('trained_last.h5')
 
     my_callback = LambdaCallback(on_epoch_end=save)
 
@@ -376,7 +378,7 @@ def train(trainable_model: Model,
 
     validation_data = next(iter(batch_generator(valid_data_generator)))
 
-    steps_per_epoch = 50
+    steps_per_epoch = 200
     common_fit_args = dict(steps_per_epoch=steps_per_epoch, validation_data=validation_data)
 
     ####### STAGE1 - train only the last layer
