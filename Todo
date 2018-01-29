@@ -1,0 +1,74 @@
+NOW:
+- zapamietywanie stanu optimizera - może zapisywać też model treningowy i dodać switcha do resetowania końcówki trenującej; sprawdzić, czy parametry optimizera się przywracają; sprawdzić, czy numer epoki da sie jakoś wyciągnąć z tego
+- gradient_stop - sprawdzić na małym przykładzie czy dobrze go rozumiem (przy okazji sprawdzić gradient tf.maximum)
+- magiczny współczynnik 2-area
+- jak ma sie suma kwadratów poszczególnych lossów (w yad2k) do darknetu?
+- oryginalny optimizer?
+- learning rate?
+- loss categorical crossentropy?
+
+
+Trenowanie darknetem:
+- bierzemy gotowy plik z wagami dla pierwszych 23 warstw (czyli przed-przedostatnia warstwa przez złączeniem z tą odnogą dla małych obiektów) "darknet19_448.conv.23". To, że plik jest dla 448 chyba nie ma znaczenia, bo tam wszystko jest konwolucyjne.
+
+
+
+Terminologia (moja):
+mały batch - liczba obrazków ładowana pomiędzy kolejnymi zawołaniami train_network_datum(), forward_network(), backward_network(); równe net.batch
+duży batch - liczba obrazków ładowana pomiędzy kolejnymi zawołaniami update_network(); równe net.subdivisions małych batchy
+komórka - jeden "piksel" wyjściowej warsty sieci konwolucyjnej, odpowiata blokowi 32x32 piksele obrazu wejściowego
+pw, ph - szerokość i wysokość w pikselach
+aw, ah - wymiary w stosunku do anchora; aw=pw/anchor.pw
+tw, th - tw=log(aw); aw=exp(tw)
+px, py - położenie pikselowe wzglęgem lewego górnego rogu
+ix, iy - położenie jako frakcja odpowiedniego wymiaru obrazu, tj. współrzędne w zakresie [0,1); ix=px/image.pw
+cx, cy - cx=px/cell.pw (cx=1 to przesunięcie o jedną komórkę)
+tx, ty - simgoid(tx)=ax
+
+
+
+Plan uczenia yad2k
+Uwagi ogólne:
+- uczenie zaczynamy od załadowania pełnego modelu; potem opcjonalnie ściągamy z niego górne warstwy (powyżej 23.)
+
+1. nauczenie od 0 dla jednej klasy
+- konwertujemy plik z wagami dla pierwszych 23 warstw lub więcej do modelu yolo; zdejmujemy warstwy ponad 23 (można rozważyć użycie funkcji create_model
+- budujemy model do trenowania (z warstwą loss)
+- trenujemy na podanym secie: katalog z obrazkami i carside plikami
+Co jeszcze:
+- ładowanie z dowolnego formatu (hdf5, jpg+txt, ...) - dla każdego formatu generator (coś jakby pluginy do ładowania danych)
+- warstwy konwolucyjne o dowolnej wielkości (--fully_convolutional w yad2k.py, ponoć nie działa z yolo2)
+- augumentacja
+- douczanie pozytywne (mamy obrazek, gdzie cos nie jest wykryte, a wiemy, że powinno)
+- douczanie negatywne (mamy obrazek, gdzie coś jest wykryte, a nie powinno)
+- możliwości z modelem wejściowym:
+  - podajemy model pełny, ale ściągamy warstwy ponad 23, a potem tworzymy własne
+  - podajemy pełny model, liczba klas musi się zgadzać
+
+  
+
+  
+YAD2K:
+detekcja:
+keras.load_model + yolo_head + yolo_eval
+yolo_head: zamienia wyjście z sieci konwolucyjnej na tablice w których elementami są kandydaci na obiekty
+yolo_eval: non-max suppression na zwróconych kandydatach
+yolo_body: sieć konwolucyjna; używana tylko przy trenowaniu, normalnie wczytujemy ją z pliku .h5 (choć nie wiem czy zupełnie identyczną)
+get_detector_mask: wylicza coś jakby oczekiwane wyjście sieci, tj. maskę z 1 tylko w tym buckecie (aka detectorze) gdzie box powinien być wykryty, "adjusted box" czyli x,y względem lewego górnego rogu komórki, w,h=log(box_w/anchor_w),...
+    
+POMYSŁY:
+
+2-1
+4-2
+8-4
+16-4
+32-4
+64-4
+128-4
+
+próby:
+prostokąt bez wypełnienia
+znacznik na losowym tle (bez skali, a potem ze skalą)
++detekcja
+transformacja z tak jak w yolo (sigmoid?)
+transformacja w i h (exp)
