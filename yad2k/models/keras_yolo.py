@@ -216,6 +216,9 @@ class YoloLossLayer(Layer):
         pred_ixy, pred_iwh, pred_confidence, pred_class_prob = yolo_head(
             yolo_output, self.anchors, self.num_classes)
 
+        # larger than whole image makes no sense (but makes nan if far too large)
+        pred_iwh = K.minimum(pred_iwh, 2)
+
         # Unadjusted box predictions for loss.
         # TODO: Remove extra computation shared with yolo_head.
         yolo_output_shape = K.shape(yolo_output)
