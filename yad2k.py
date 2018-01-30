@@ -38,8 +38,7 @@ parser.add_argument(
 parser.add_argument(
     '-flcl',
     '--fully_convolutional',
-    help='Model is fully convolutional so set input shape to (None, None, 3). '
-    'WARNING: This experimental option does not work properly for YOLO_v2.',
+    help='Model is fully convolutional so set input shape to (None, None, 3). ',
     action='store_true')
 
 
